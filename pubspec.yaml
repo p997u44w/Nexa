@@ -27,6 +27,11 @@ dev_dependencies:
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1
 
+# ⭐ رفع خطای objective_c: arm64e
+# این override باعث می‌شه نسخه سازگار با Flutter SDK تو نصب بشه
+dependency_overrides:
+  objective_c: 9.5.0
+
 flutter:
   uses-material-design: true
   assets:
