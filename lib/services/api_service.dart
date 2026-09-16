@@ -5,11 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   // آدرس هاب مرکزی — اولین جایی که اپ برای پیدا کردن هاست هر مدرسه بهش وصل می‌شه.
+  // اگه سیستم چندهاستی نمی‌خواید و فقط یه بک‌اند دارید، این رو خالی بذارید
+  // و مستقیم مقدار baseUrl رو به آدرس همون بک‌اند ثابت کنید.
   static const String hubUrl = 'https://hub.nexa-school.ir';
 
   static String? _resolvedBaseUrl;
 
-  /// آدرس بک‌اندی که الان باهاش کار می‌کنیم.
+  /// آدرس بک‌اندی که الان باهاش کار می‌کنیم. یا از حافظه (اگه قبلا resolve شده)
+  /// یا آدرس ثابت پیش‌فرض (اگه از هاب مرکزی استفاده نمی‌کنید).
   static Future<String> get baseUrl async {
     if (_resolvedBaseUrl != null) return _resolvedBaseUrl!;
     final prefs = await SharedPreferences.getInstance();
@@ -18,11 +21,12 @@ class ApiService {
       _resolvedBaseUrl = saved;
       return saved;
     }
-    // ⭐ ریشه دامنه — مسیرهای ماژول‌ها رو توی path پاس می‌دیم
+    // اگه هنوز resolve نشده و سیستم تک‌هاستی هست، همینجا آدرس ثابت‌تون رو بذارید:
     return 'https://nexa-school.ir';
   }
 
   /// از هاب مرکزی می‌پرسه «این کد مدرسه مال کدوم هاسته» و نتیجه رو ذخیره می‌کنه.
+  /// فقط لازمه یک‌بار (اولین ورود) صدا زده بشه؛ دفعات بعد از حافظه خونده می‌شه.
   static Future<Map<String, dynamic>> resolveSchool(String schoolCode) async {
     final res = await http.get(Uri.parse('$hubUrl/schools/resolve?school_code=$schoolCode'));
     final data = jsonDecode(res.body);
@@ -36,7 +40,7 @@ class ApiService {
     return data;
   }
 
-  /// کاربر می‌تونه از یه مدرسه‌ی دیگه دوباره وارد بشه
+  /// کاربر می‌تونه از یه مدرسه‌ی دیگه دوباره وارد بشه (کد مدرسه‌ی ذخیره‌شده رو پاک می‌کنه)
   static Future<void> forgetSchool() async {
     _resolvedBaseUrl = null;
     final prefs = await SharedPreferences.getInstance();
@@ -49,6 +53,9 @@ class ApiService {
     return prefs.getString('school_code');
   }
 
+  /// اگه false باشه، یعنی فقط یه بک‌اند دارید (بدون هاب مرکزی) و مرحله‌ی
+  /// «کد مدرسه» کلا رد می‌شه؛ در اون صورت خط `return 'https://nexa-school.ir';`
+  /// بالا (تو getter باسه‌یو‌آرال) رو با آدرس بک‌اند واقعی‌تون عوض کنید.
   static const bool useHub = false;
 
   static Future<String?> get _token async {
@@ -56,6 +63,7 @@ class ApiService {
     return prefs.getString('token');
   }
 
+  /// دسترسی عمومی به توکن خام (مثلا برای دادنش به سرور سیگنالینگ کلاس آنلاین)
   static Future<String?> get rawToken => _token;
 
   static Future<void> saveSession(String token, Map<String, dynamic> user) async {
@@ -85,77 +93,20 @@ class ApiService {
     return headers;
   }
 
-  /// ⭐ POST با timeout و try/catch — دیگه اسپینر بی‌نهایت نمی‌چرخه
-  static Future<Map<String, dynamic>> post(
-    String path,
-    Map<String, dynamic> body, {
-    bool auth = false,
-  }) async {
+  static Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body, {bool auth = false}) async {
     final base = await baseUrl;
-    final url = '$base/$path';
-    debugPrint('🌐 POST: $url');
-
-    try {
-      final res = await http
-          .post(
-            Uri.parse(url),
-            headers: await _headers(auth: auth),
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('📥 Status: ${res.statusCode}');
-      debugPrint('📥 Body: ${res.body}');
-
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        return jsonDecode(res.body) as Map<String, dynamic>;
-      } else {
-        return {
-          'success': false,
-          'message': 'خطای سرور (${res.statusCode})',
-        };
-      }
-    } catch (e) {
-      debugPrint('❌ POST Error: $e');
-      return {
-        'success': false,
-        'message': 'خطا در اتصال به سرور: $e',
-      };
-    }
+    final res = await http.post(
+      Uri.parse('$base/$path'),
+      headers: await _headers(auth: auth),
+      body: jsonEncode(body),
+    );
+    return jsonDecode(res.body);
   }
 
-  /// ⭐ GET با timeout و try/catch
   static Future<Map<String, dynamic>> get(String path, {bool auth = true}) async {
     final base = await baseUrl;
-    final url = '$base/$path';
-    debugPrint('🌐 GET: $url');
-
-    try {
-      final res = await http
-          .get(
-            Uri.parse(url),
-            headers: await _headers(auth: auth, json: false),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('📥 Status: ${res.statusCode}');
-      debugPrint('📥 Body: ${res.body}');
-
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        return jsonDecode(res.body) as Map<String, dynamic>;
-      } else {
-        return {
-          'success': false,
-          'message': 'خطای سرور (${res.statusCode})',
-        };
-      }
-    } catch (e) {
-      debugPrint('❌ GET Error: $e');
-      return {
-        'success': false,
-        'message': 'خطا در اتصال به سرور: $e',
-      };
-    }
+    final res = await http.get(Uri.parse('$base/$path'), headers: await _headers(auth: auth, json: false));
+    return jsonDecode(res.body);
   }
 
   /// آپلود فرم چندبخشی (برای تکلیف، پیام عکس/ویس و ...)
@@ -167,41 +118,21 @@ class ApiService {
   }) async {
     final base = await baseUrl;
     final uri = Uri.parse('$base/$path');
-    debugPrint('🌐 UPLOAD: $uri');
-
-    try {
-      final request = http.MultipartRequest('POST', uri);
-      final t = await _token;
-      if (t != null) request.headers['Authorization'] = 'Bearer $t';
-      request.fields.addAll(fields);
-      if (filePath != null) {
-        request.files.add(await http.MultipartFile.fromPath(fileField, filePath));
-      }
-      final streamed = await request.send().timeout(const Duration(seconds: 60));
-      final res = await http.Response.fromStream(streamed);
-
-      debugPrint('📥 Status: ${res.statusCode}');
-      debugPrint('📥 Body: ${res.body}');
-
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        return jsonDecode(res.body) as Map<String, dynamic>;
-      } else {
-        return {
-          'success': false,
-          'message': 'خطای سرور (${res.statusCode})',
-        };
-      }
-    } catch (e) {
-      debugPrint('❌ UPLOAD Error: $e');
-      return {
-        'success': false,
-        'message': 'خطا در آپلود: $e',
-      };
+    final request = http.MultipartRequest('POST', uri);
+    final t = await _token;
+    if (t != null) request.headers['Authorization'] = 'Bearer $t';
+    request.fields.addAll(fields);
+    if (filePath != null) {
+      request.files.add(await http.MultipartFile.fromPath(fileField, filePath));
     }
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    return jsonDecode(res.body);
   }
 }
 
-/// تم اختصاصی هر مدرسه
+/// تم اختصاصی هر مدرسه که ادمین از پنل خودش تنظیم می‌کنه.
+/// وقتی کاربر لاگین می‌کنه، از school/get-theme خونده و کل اپ با همین رنگ‌ها رنگ می‌شه.
 class SchoolTheme {
   final Color primary;
   final Color secondary;
@@ -214,7 +145,7 @@ class SchoolTheme {
 
   static Future<SchoolTheme> fetch() async {
     try {
-      final res = await ApiService.get('modules/school/get-theme.php', auth: false);
+      final res = await ApiService.get('school/get-theme');
       if (res['success'] == true) {
         final data = res['data'];
         final base = await ApiService.baseUrl;
